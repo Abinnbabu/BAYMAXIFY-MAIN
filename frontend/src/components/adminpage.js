@@ -566,7 +566,7 @@ function ManageDoctors({ T }) {
             No doctors match your search
           </div>
         ) : filtered.map((doc, i) => (
-          <div key={doc.id} className="row-item"
+          <div key={doc._id} className="row-item"
             style={{
               display:"grid",gridTemplateColumns:"2fr 2fr 1.2fr 1fr 1.2fr 120px",
               padding:"14px 20px",alignItems:"center",
@@ -844,7 +844,7 @@ function ManageMedicines({ T }) {
             No medicines match your search
           </div>
         ) : filtered.map((med, i) => (
-          <div key={med.id} className="row-item"
+          <div key={med._id} className="row-item"
             style={{
               display:"grid",gridTemplateColumns:"2.2fr 1.4fr 0.8fr 0.8fr 1.2fr 0.9fr 110px",
               padding:"13px 20px",alignItems:"center",

@@ -246,53 +246,39 @@ function Navbar({ T, themeKey, setThemeKey, cartCount }) {
   );
 }
 
-/* ─── Medicine Data (20 medicines) ──────────────────────────────────────────── */
-/* 
-  Medicine images use DiceBear's "icons" avatar as a placeholder pill/capsule illustration.
-  TODO: Replace imageUrl values with real product images from your backend/CDN.
-         GET /api/medicines → returns { id, name, category, price, imageUrl, isPrescribed }
-*/
-const MEDICINES = [
-  { id:1,  name:"Escitalopram 10mg",   category:"Psychiatry",    price:180, isPrescribed:true,  color:"#6366F1", shape:"capsule",  imageKey:"escitalopram"  },
-  { id:2,  name:"Clonazepam 0.5mg",    category:"Psychiatry",    price:95,  isPrescribed:true,  color:"#8B5CF6", shape:"tablet",   imageKey:"clonazepam"    },
-  { id:3,  name:"Melatonin 3mg",        category:"Sleep",         price:220, isPrescribed:true,  color:"#0EA5E9", shape:"capsule",  imageKey:"melatonin"     },
-  { id:4,  name:"Sertraline 50mg",      category:"Psychiatry",    price:145, isPrescribed:false, color:"#10B981", shape:"tablet",   imageKey:"sertraline"    },
-  { id:5,  name:"Zolpidem 5mg",         category:"Sleep",         price:310, isPrescribed:false, color:"#F59E0B", shape:"tablet",   imageKey:"zolpidem"      },
-  { id:6,  name:"Propranolol 20mg",     category:"Cardiology",    price:75,  isPrescribed:false, color:"#EF4444", shape:"capsule",  imageKey:"propranolol"   },
-  { id:7,  name:"Amitriptyline 10mg",   category:"Psychiatry",    price:88,  isPrescribed:false, color:"#EC4899", shape:"tablet",   imageKey:"amitriptyline" },
-  { id:8,  name:"B-Complex Forte",      category:"Supplements",   price:130, isPrescribed:false, color:"#F97316", shape:"capsule",  imageKey:"bcomplex"      },
-  { id:9,  name:"Vitamin D3 60K",       category:"Supplements",   price:165, isPrescribed:false, color:"#EAB308", shape:"capsule",  imageKey:"vitamind"      },
-  { id:10, name:"Omega-3 1000mg",       category:"Supplements",   price:480, isPrescribed:false, color:"#14B8A6", shape:"softgel", imageKey:"omega3"        },
-  { id:11, name:"Paracetamol 500mg",    category:"Pain Relief",   price:28,  isPrescribed:false, color:"#64748B", shape:"tablet",   imageKey:"paracetamol"   },
-  { id:12, name:"Ibuprofen 400mg",      category:"Pain Relief",   price:45,  isPrescribed:false, color:"#DC2626", shape:"tablet",   imageKey:"ibuprofen"     },
-  { id:13, name:"Cetirizine 10mg",      category:"Allergy",       price:55,  isPrescribed:false, color:"#2563EB", shape:"tablet",   imageKey:"cetirizine"    },
-  { id:14, name:"Montelukast 10mg",     category:"Allergy",       price:210, isPrescribed:false, color:"#7C3AED", shape:"tablet",   imageKey:"montelukast"   },
-  { id:15, name:"Metformin 500mg",      category:"Diabetes",      price:60,  isPrescribed:false, color:"#059669", shape:"tablet",   imageKey:"metformin"     },
-  { id:16, name:"Atorvastatin 10mg",    category:"Cardiology",    price:125, isPrescribed:false, color:"#B45309", shape:"tablet",   imageKey:"atorvastatin"  },
-  { id:17, name:"Pantoprazole 40mg",    category:"Gastro",        price:88,  isPrescribed:false, color:"#0891B2", shape:"capsule",  imageKey:"pantoprazole"  },
-  { id:18, name:"Azithromycin 500mg",   category:"Antibiotic",    price:195, isPrescribed:false, color:"#BE185D", shape:"tablet",   imageKey:"azithromycin"  },
-  { id:19, name:"Ondansetron 4mg",      category:"Gastro",        price:72,  isPrescribed:false, color:"#0D9488", shape:"tablet",   imageKey:"ondansetron"   },
-  { id:20, name:"Ashwagandha 300mg",    category:"Supplements",   price:350, isPrescribed:false, color:"#A16207", shape:"capsule",  imageKey:"ashwagandha"   },
-  { id:21, name:"Magnesium Glycinate",  category:"Supplements",   price:420, isPrescribed:false, color:"#475569", shape:"capsule",  imageKey:"magnesium"     },
-  { id:22, name:"Losartan 50mg",        category:"Cardiology",    price:98,  isPrescribed:false, color:"#1D4ED8", shape:"tablet",   imageKey:"losartan"      },
-];
+const UI_COLORS = ["#6366F1","#8B5CF6","#0EA5E9","#10B981","#F59E0B","#EF4444","#EC4899","#14B8A6","#2255A4","#B85C1A"];
+const UI_SHAPES = ["capsule", "tablet", "softgel"];
 
-const CATEGORIES = ["All", ...Array.from(new Set(MEDICINES.map(m => m.category)))];
+/** Map Mongo medicine docs to UI fields (color/shape for SVG) */
+function normalizeMedicineForUi(m) {
+  const id = m._id ?? m.id;
+  const s = String(id);
+  let hash = 0;
+  for (let i = 0; i < s.length; i++) hash = (hash * 31 + s.charCodeAt(i)) >>> 0;
+  return {
+    ...m,
+    _id: id,
+    color: m.color || UI_COLORS[hash % UI_COLORS.length],
+    shape: m.shape || UI_SHAPES[hash % UI_SHAPES.length],
+    __illId: s.replace(/[^a-fA-F0-9]/g, "") || "0",
+  };
+}
 
 /* ─── Medicine image illustration (SVG pill/capsule per medicine) ────────────── */
 function MedIllustration({ medicine, size = 80 }) {
   const c = medicine.color;
   const s = medicine.shape;
+  const mid = medicine.__illId || String(medicine._id ?? medicine.id ?? "0").replace(/[^a-fA-F0-9]/g, "") || "0";
 
   if (s === "softgel") return (
     <svg width={size} height={size} viewBox="0 0 80 80">
       <defs>
-        <radialGradient id={`sg-${medicine.id}`} cx="35%" cy="30%" r="65%">
+        <radialGradient id={`sg-${mid}`} cx="35%" cy="30%" r="65%">
           <stop offset="0%" stopColor={c} stopOpacity=".9"/>
           <stop offset="100%" stopColor={c} stopOpacity=".45"/>
         </radialGradient>
       </defs>
-      <ellipse cx="40" cy="40" rx="28" ry="22" fill={`url(#sg-${medicine.id})`}/>
+      <ellipse cx="40" cy="40" rx="28" ry="22" fill={`url(#sg-${mid})`}/>
       <ellipse cx="40" cy="40" rx="28" ry="22" fill="none" stroke={c} strokeWidth="1.5" strokeOpacity=".4"/>
       <ellipse cx="33" cy="34" rx="7" ry="5" fill="#fff" fillOpacity=".25"/>
     </svg>
@@ -301,33 +287,28 @@ function MedIllustration({ medicine, size = 80 }) {
   if (s === "capsule") return (
     <svg width={size} height={size} viewBox="0 0 80 80">
       <defs>
-        <linearGradient id={`cp-${medicine.id}`} x1="0%" y1="0%" x2="100%" y2="100%">
+        <linearGradient id={`cp-${mid}`} x1="0%" y1="0%" x2="100%" y2="100%">
           <stop offset="0%" stopColor={c} stopOpacity=".95"/>
           <stop offset="100%" stopColor={c} stopOpacity=".5"/>
         </linearGradient>
       </defs>
-      {/* Left half */}
-      <path d="M20 40 A18 18 0 0 1 38 22 L38 58 A18 18 0 0 1 20 40 Z" fill={`url(#cp-${medicine.id})`}/>
-      {/* Right half */}
+      <path d="M20 40 A18 18 0 0 1 38 22 L38 58 A18 18 0 0 1 20 40 Z" fill={`url(#cp-${mid})`}/>
       <path d="M42 22 L42 58 A18 18 0 0 0 60 40 A18 18 0 0 0 42 22 Z" fill={c} fillOpacity=".35"/>
-      {/* Seam */}
       <line x1="40" y1="22" x2="40" y2="58" stroke="#fff" strokeWidth="1.5" strokeOpacity=".5"/>
       <ellipse cx="30" cy="34" rx="5" ry="3" fill="#fff" fillOpacity=".22" transform="rotate(-20,30,34)"/>
     </svg>
   );
 
-  // tablet (default)
   return (
     <svg width={size} height={size} viewBox="0 0 80 80">
       <defs>
-        <radialGradient id={`tb-${medicine.id}`} cx="38%" cy="32%" r="65%">
+        <radialGradient id={`tb-${mid}`} cx="38%" cy="32%" r="65%">
           <stop offset="0%" stopColor={c} stopOpacity=".92"/>
           <stop offset="100%" stopColor={c} stopOpacity=".48"/>
         </radialGradient>
       </defs>
-      <rect x="14" y="26" width="52" height="28" rx="14" fill={`url(#tb-${medicine.id})`}/>
+      <rect x="14" y="26" width="52" height="28" rx="14" fill={`url(#tb-${mid})`}/>
       <rect x="14" y="26" width="52" height="28" rx="14" fill="none" stroke={c} strokeWidth="1.5" strokeOpacity=".3"/>
-      {/* Score line */}
       <line x1="40" y1="28" x2="40" y2="54" stroke="#fff" strokeWidth="1.5" strokeOpacity=".4"/>
       <ellipse cx="30" cy="35" rx="6" ry="4" fill="#fff" fillOpacity=".2" transform="rotate(-10,30,35)"/>
     </svg>
@@ -400,7 +381,9 @@ export default function MedicineCartPage() {
       getMedicines().catch(() => []),
       getMyPrescriptions().catch(() => []),
     ]).then(([meds, prescriptions]) => {
-      setMedicines(Array.isArray(meds) ? meds : []);
+      setMedicines(
+        (Array.isArray(meds) ? meds : []).map(normalizeMedicineForUi)
+      );
       const rxList = Array.isArray(prescriptions) ? prescriptions : [];
       setRxBanner(prescriptionBannerFromList(rxList));
       const names = rxList.flatMap((p) =>
@@ -408,6 +391,19 @@ export default function MedicineCartPage() {
       );
       setPrescribedMeds([...new Set(names)]);
     }).finally(() => setLoading(false));
+  }, []);
+
+  /* Refresh catalogue when returning from another tab (e.g. after admin adds medicine) */
+  useEffect(() => {
+    const onFocus = () => {
+      getMedicines()
+        .then((meds) =>
+          setMedicines((Array.isArray(meds) ? meds : []).map(normalizeMedicineForUi))
+        )
+        .catch(() => {});
+    };
+    window.addEventListener("focus", onFocus);
+    return () => window.removeEventListener("focus", onFocus);
   }, []);
 
   const setQty = (id, delta) => {
