@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useContext } from "react";
+import { useState, useEffect, useRef, useContext, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import { ThemeContext } from "../App";
 import { getDoctors, bookAppointment, getUser } from "../api";
@@ -788,6 +788,11 @@ function BookingModal({ T, doctor, onClose }) {
   );
 }
 
+function doctorAvailabilityLabel(status) {
+  if (status === "active") return "Accepting patients";
+  return "Currently unavailable";
+}
+
 function Stars({ rating, primary }) {
   return (
     <div style={{ display:"flex",alignItems:"center",gap:4 }}>
@@ -821,33 +826,24 @@ export default function MedicalSupport() {
       .finally(() => setLoadingDocs(false));
   }, []);
 
-  useEffect(() => {
-    const onFocus = () => {
-      getDoctors()
-        .then((data) => setDoctors(Array.isArray(data) ? data : []))
-        .catch(() => {});
-    };
-    window.addEventListener("focus", onFocus);
-    return () => window.removeEventListener("focus", onFocus);
-  }, []);
-
   const T = THEMES[themeKey];
 
-  const specializations = [
-    "All",
-    ...Array.from(new Set(doctors.map((d) => d.specialty).filter(Boolean))).sort(),
-  ];
+  const specialtyOptions = useMemo(() => {
+    const set = new Set(doctors.map((d) => d.specialty).filter(Boolean));
+    return ["All", ...Array.from(set).sort()];
+  }, [doctors]);
 
-  const filtered = doctors.filter((d) => {
-    const q = search.toLowerCase();
-    const matchSearch =
-      d.name?.toLowerCase().includes(q) || d.specialty?.toLowerCase().includes(q);
+  useEffect(() => {
+    if (filter !== "All" && !specialtyOptions.includes(filter)) {
+      setFilter("All");
+    }
+  }, [specialtyOptions, filter]);
+
+  const filtered = doctors.filter(d => {
+    const matchSearch = d.name.toLowerCase().includes(search.toLowerCase());
     const matchFilter = filter === "All" || d.specialty === filter;
     return matchSearch && matchFilter;
   });
-
-  const doctorStatusLabel = (d) =>
-    d.status === "active" ? "Available for booking" : "Currently unavailable";
 
   const card = {
     background:T.surface, borderRadius:22,
@@ -929,11 +925,7 @@ export default function MedicalSupport() {
                   backgroundRepeat:"no-repeat",backgroundPosition:"right 16px center",
                   paddingRight:40,cursor:"pointer",
                 }}>
-                  {specializations.map((s) => (
-                    <option key={s} value={s}>
-                      {s}
-                    </option>
-                  ))}
+                  {specialtyOptions.map(s => <option key={s}>{s}</option>)}
                 </select>
               </div>
             </div>
@@ -947,8 +939,8 @@ export default function MedicalSupport() {
                 <p style={{ color:T.muted,gridColumn:"1/-1",textAlign:"center",padding:"40px 0" }}>
                   No doctors found matching your search.
                 </p>
-              ) : filtered.map((doc) => (
-                <div key={doc._id} className="doc-card" style={{ ...card,padding:"32px 28px" }}>
+              ) : filtered.map((doc,i) => (
+                <div key={doc._id || i} className="doc-card" style={{ ...card,padding:"32px 28px" }}>
                   <div style={{ display:"flex",alignItems:"center",gap:14,marginBottom:18 }}>
                     <div style={{
                       width:50,height:50,borderRadius:16,
@@ -968,10 +960,8 @@ export default function MedicalSupport() {
                   </div>
 
                   <div style={{ marginBottom:12 }}>
-                    <Stars rating={typeof doc.rating === "number" ? doc.rating : parseFloat(doc.rating) || 0} primary={T.primary}/>
-                    <p style={{ color:T.muted,fontSize:".75rem",marginTop:4 }}>
-                      {(doc.reviews ?? 0).toLocaleString()} verified reviews
-                    </p>
+                    <Stars rating={doc.rating} primary={T.primary}/>
+                    <p style={{ color:T.muted,fontSize:".75rem",marginTop:4 }}>{doc.reviews ?? 0} verified reviews</p>
                   </div>
 
                   <div style={{
@@ -979,24 +969,28 @@ export default function MedicalSupport() {
                     background:`${T.primary}18`,border:`1px solid ${T.primary}30`,
                     borderRadius:99,padding:"5px 12px",marginBottom:24,
                   }}>
-                    <div style={{ width:7,height:7,borderRadius:"50%",background:doc.status==="active"?T.primary:T.muted }}/>
-                    <span style={{ fontSize:".78rem",fontWeight:500,color:T.primary }}>{doctorStatusLabel(doc)}</span>
+                    <div style={{
+                      width:7,height:7,borderRadius:"50%",
+                      background: doc.status === "active" ? T.primary : T.muted,
+                    }}/>
+                    <span style={{ fontSize:".78rem",fontWeight:500,color:T.primary }}>
+                      {doctorAvailabilityLabel(doc.status)}
+                    </span>
                   </div>
+                  {doc.location ? (
+                    <p style={{ fontSize:".78rem",color:T.muted,marginBottom:16,lineHeight:1.5 }}>{doc.location}</p>
+                  ) : null}
 
                   <div style={{ display:"flex",flexWrap:"wrap",gap:8 }}>
                     <button className="cta-btn"
-                      type="button"
-                      disabled={doc.status !== "active"}
-                      onClick={() => doc.status === "active" && setBookDoctor(doc)}
+                      onClick={() => setBookDoctor(doc)}
                       style={{
                         flex:1,background:T.primary,color:"#fff",
                         border:"none",borderRadius:12,padding:"10px 14px",
                         fontFamily:"'DM Sans', sans-serif",fontWeight:600,fontSize:".83rem",
                         letterSpacing:".03em",boxShadow:`0 4px 16px ${T.primary}40`,
-                        opacity: doc.status === "active" ? 1 : 0.45,
-                        cursor: doc.status === "active" ? "pointer" : "not-allowed",
                       }}>
-                      {doc.status === "active" ? "Book Appointment" : "Unavailable"}
+                      Book Appointment
                     </button>
                     <button className="cta-btn"
                       onClick={() => setMapDoctor(doc)}

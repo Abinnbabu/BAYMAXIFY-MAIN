@@ -246,39 +246,21 @@ function Navbar({ T, themeKey, setThemeKey, cartCount }) {
   );
 }
 
-const UI_COLORS = ["#6366F1","#8B5CF6","#0EA5E9","#10B981","#F59E0B","#EF4444","#EC4899","#14B8A6","#2255A4","#B85C1A"];
-const UI_SHAPES = ["capsule", "tablet", "softgel"];
-
-/** Map Mongo medicine docs to UI fields (color/shape for SVG) */
-function normalizeMedicineForUi(m) {
-  const id = m._id ?? m.id;
-  const s = String(id);
-  let hash = 0;
-  for (let i = 0; i < s.length; i++) hash = (hash * 31 + s.charCodeAt(i)) >>> 0;
-  return {
-    ...m,
-    _id: id,
-    color: m.color || UI_COLORS[hash % UI_COLORS.length],
-    shape: m.shape || UI_SHAPES[hash % UI_SHAPES.length],
-    __illId: s.replace(/[^a-fA-F0-9]/g, "") || "0",
-  };
-}
-
 /* ─── Medicine image illustration (SVG pill/capsule per medicine) ────────────── */
 function MedIllustration({ medicine, size = 80 }) {
-  const c = medicine.color;
-  const s = medicine.shape;
-  const mid = medicine.__illId || String(medicine._id ?? medicine.id ?? "0").replace(/[^a-fA-F0-9]/g, "") || "0";
+  const key = String(medicine._id || medicine.id || "m").replace(/[^a-zA-Z0-9]/g, "");
+  const c = medicine.color || "#6366F1";
+  const s = medicine.shape || "tablet";
 
   if (s === "softgel") return (
     <svg width={size} height={size} viewBox="0 0 80 80">
       <defs>
-        <radialGradient id={`sg-${mid}`} cx="35%" cy="30%" r="65%">
+        <radialGradient id={`sg-${key}`} cx="35%" cy="30%" r="65%">
           <stop offset="0%" stopColor={c} stopOpacity=".9"/>
           <stop offset="100%" stopColor={c} stopOpacity=".45"/>
         </radialGradient>
       </defs>
-      <ellipse cx="40" cy="40" rx="28" ry="22" fill={`url(#sg-${mid})`}/>
+      <ellipse cx="40" cy="40" rx="28" ry="22" fill={`url(#sg-${key})`}/>
       <ellipse cx="40" cy="40" rx="28" ry="22" fill="none" stroke={c} strokeWidth="1.5" strokeOpacity=".4"/>
       <ellipse cx="33" cy="34" rx="7" ry="5" fill="#fff" fillOpacity=".25"/>
     </svg>
@@ -287,12 +269,12 @@ function MedIllustration({ medicine, size = 80 }) {
   if (s === "capsule") return (
     <svg width={size} height={size} viewBox="0 0 80 80">
       <defs>
-        <linearGradient id={`cp-${mid}`} x1="0%" y1="0%" x2="100%" y2="100%">
+        <linearGradient id={`cp-${key}`} x1="0%" y1="0%" x2="100%" y2="100%">
           <stop offset="0%" stopColor={c} stopOpacity=".95"/>
           <stop offset="100%" stopColor={c} stopOpacity=".5"/>
         </linearGradient>
       </defs>
-      <path d="M20 40 A18 18 0 0 1 38 22 L38 58 A18 18 0 0 1 20 40 Z" fill={`url(#cp-${mid})`}/>
+      <path d="M20 40 A18 18 0 0 1 38 22 L38 58 A18 18 0 0 1 20 40 Z" fill={`url(#cp-${key})`}/>
       <path d="M42 22 L42 58 A18 18 0 0 0 60 40 A18 18 0 0 0 42 22 Z" fill={c} fillOpacity=".35"/>
       <line x1="40" y1="22" x2="40" y2="58" stroke="#fff" strokeWidth="1.5" strokeOpacity=".5"/>
       <ellipse cx="30" cy="34" rx="5" ry="3" fill="#fff" fillOpacity=".22" transform="rotate(-20,30,34)"/>
@@ -302,12 +284,12 @@ function MedIllustration({ medicine, size = 80 }) {
   return (
     <svg width={size} height={size} viewBox="0 0 80 80">
       <defs>
-        <radialGradient id={`tb-${mid}`} cx="38%" cy="32%" r="65%">
+        <radialGradient id={`tb-${key}`} cx="38%" cy="32%" r="65%">
           <stop offset="0%" stopColor={c} stopOpacity=".92"/>
           <stop offset="100%" stopColor={c} stopOpacity=".48"/>
         </radialGradient>
       </defs>
-      <rect x="14" y="26" width="52" height="28" rx="14" fill={`url(#tb-${mid})`}/>
+      <rect x="14" y="26" width="52" height="28" rx="14" fill={`url(#tb-${key})`}/>
       <rect x="14" y="26" width="52" height="28" rx="14" fill="none" stroke={c} strokeWidth="1.5" strokeOpacity=".3"/>
       <line x1="40" y1="28" x2="40" y2="54" stroke="#fff" strokeWidth="1.5" strokeOpacity=".4"/>
       <ellipse cx="30" cy="35" rx="6" ry="4" fill="#fff" fillOpacity=".2" transform="rotate(-10,30,35)"/>
@@ -381,9 +363,7 @@ export default function MedicineCartPage() {
       getMedicines().catch(() => []),
       getMyPrescriptions().catch(() => []),
     ]).then(([meds, prescriptions]) => {
-      setMedicines(
-        (Array.isArray(meds) ? meds : []).map(normalizeMedicineForUi)
-      );
+      setMedicines(Array.isArray(meds) ? meds : []);
       const rxList = Array.isArray(prescriptions) ? prescriptions : [];
       setRxBanner(prescriptionBannerFromList(rxList));
       const names = rxList.flatMap((p) =>
@@ -391,19 +371,6 @@ export default function MedicineCartPage() {
       );
       setPrescribedMeds([...new Set(names)]);
     }).finally(() => setLoading(false));
-  }, []);
-
-  /* Refresh catalogue when returning from another tab (e.g. after admin adds medicine) */
-  useEffect(() => {
-    const onFocus = () => {
-      getMedicines()
-        .then((meds) =>
-          setMedicines((Array.isArray(meds) ? meds : []).map(normalizeMedicineForUi))
-        )
-        .catch(() => {});
-    };
-    window.addEventListener("focus", onFocus);
-    return () => window.removeEventListener("focus", onFocus);
   }, []);
 
   const setQty = (id, delta) => {
@@ -670,7 +637,7 @@ export default function MedicineCartPage() {
 
                       {/* Image zone */}
                       <div style={{
-                        background: `linear-gradient(145deg, ${med.color}12 0%, ${med.color}06 100%)`,
+                        background: `linear-gradient(145deg, ${med.color || "#6366F1"}12 0%, ${med.color || "#6366F1"}06 100%)`,
                         display:"flex",alignItems:"center",justifyContent:"center",
                         padding:"28px 20px 18px",
                         borderBottom:`1px solid ${T.subtle}`,
@@ -679,11 +646,11 @@ export default function MedicineCartPage() {
                         {/* Decorative ring */}
                         <div style={{
                           position:"absolute",width:100,height:100,borderRadius:"50%",
-                          border:`1px solid ${med.color}18`,
+                          border:`1px solid ${(med.color || "#6366F1")}18`,
                         }}/>
                         <div style={{
                           position:"absolute",width:70,height:70,borderRadius:"50%",
-                          border:`1px solid ${med.color}22`,
+                          border:`1px solid ${(med.color || "#6366F1")}22`,
                         }}/>
                         <MedIllustration medicine={med} size={80} />
                       </div>

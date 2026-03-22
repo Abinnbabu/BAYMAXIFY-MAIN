@@ -1,126 +1,249 @@
 const router = require("express").Router();
 const mongoose = require("mongoose");
+const bcrypt = require("bcryptjs");
 const auth = require("../middleware/auth");
 const Doctor = require("../models/Doctor");
-const Medicine = require("../models/Medicine");
 const User = require("../models/User");
+const Medicine = require("../models/Medicine");
+const Prescription = require("../models/Prescription");
+const Appointment = require("../models/Appointment");
 
-function adminOnly(req, res, next) {
-  if (req.user?.role !== "admin")
+function requireAdmin(req, res, next) {
+  if (req.user?.role !== "admin") {
     return res.status(403).json({ message: "Admin access required" });
+  }
   next();
 }
 
-/* ═══ Doctors ═══════════════════════════════════════════════════ */
+function doctorToJSON(doc) {
+  const o = doc.toObject ? doc.toObject() : { ...doc };
+  o.loginEmail = o.userId?.email || "";
+  return o;
+}
 
-router.get("/doctors", auth, adminOnly, async (req, res) => {
+router.use(auth);
+router.use(requireAdmin);
+
+/* ══════════════════════════════════════════════════════════════════
+   DOCTORS
+══════════════════════════════════════════════════════════════════ */
+
+router.get("/doctors", async (req, res) => {
   try {
-    const doctors = await Doctor.find().sort({ name: 1 });
-    res.json(doctors);
+    const list = await Doctor.find()
+      .sort({ createdAt: -1 })
+      .populate("userId", "email name role");
+    res.json(list.map((d) => doctorToJSON(d)));
   } catch (e) {
     res.status(500).json({ message: e.message });
   }
 });
 
-router.post("/doctors", auth, adminOnly, async (req, res) => {
+/**
+ * Create doctor profile + User account (email/password) for login → /doctorpage
+ */
+router.post("/doctors", async (req, res) => {
   try {
-    const { name, specialty, status, location, phone, rating } = req.body;
-    if (!name?.trim() || !location?.trim())
-      return res.status(400).json({ message: "Name and location are required" });
+    const {
+      name,
+      specialty,
+      location,
+      phone,
+      rating,
+      status,
+      email,
+      password,
+    } = req.body;
+
+    if (!name?.trim() || !specialty?.trim()) {
+      return res.status(400).json({ message: "Name and specialty are required" });
+    }
+    if (!email?.trim() || !password || password.length < 6) {
+      return res.status(400).json({
+        message: "Doctor login email and password (min 6 characters) are required",
+      });
+    }
+
+    const em = email.toLowerCase().trim();
+    if (await User.findOne({ email: em })) {
+      return res.status(400).json({ message: "Email already registered" });
+    }
+
+    const hashed = await bcrypt.hash(password, 10);
+    const user = await User.create({
+      name: name.trim(),
+      email: em,
+      password: hashed,
+      role: "doctor",
+    });
+
     const doc = await Doctor.create({
       name: name.trim(),
-      specialty: specialty?.trim() || "General",
-      status: status === "inactive" ? "inactive" : "active",
-      location: location.trim(),
+      specialty: specialty.trim(),
+      location: (location || "").trim(),
       phone: (phone || "").trim(),
-      rating: parseFloat(rating) || 4.5,
+      rating: Number(rating) || 4.5,
+      reviews: 0,
+      status: status === "inactive" ? "inactive" : "active",
+      userId: user._id,
     });
-    res.status(201).json(doc);
+
+    const populated = await Doctor.findById(doc._id).populate(
+      "userId",
+      "email name role"
+    );
+    res.status(201).json(doctorToJSON(populated));
   } catch (e) {
     res.status(500).json({ message: e.message });
   }
 });
 
-router.put("/doctors/:id", auth, adminOnly, async (req, res) => {
+router.put("/doctors/:id", async (req, res) => {
   try {
-    if (!mongoose.Types.ObjectId.isValid(req.params.id))
-      return res.status(400).json({ message: "Invalid id" });
-    const { name, specialty, status, location, phone, rating } = req.body;
-    const updates = {};
-    if (name != null) updates.name = String(name).trim();
-    if (specialty != null) updates.specialty = String(specialty).trim();
-    if (status != null && ["active", "inactive"].includes(status)) updates.status = status;
-    if (location != null) updates.location = String(location).trim();
-    if (phone != null) updates.phone = String(phone).trim();
-    if (rating != null) updates.rating = parseFloat(rating) || 0;
-    const doc = await Doctor.findByIdAndUpdate(req.params.id, updates, {
-      new: true,
-      runValidators: true,
-    });
+    if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
+      return res.status(400).json({ message: "Invalid doctor id" });
+    }
+    const doc = await Doctor.findById(req.params.id);
     if (!doc) return res.status(404).json({ message: "Doctor not found" });
-    res.json(doc);
+
+    const {
+      name,
+      specialty,
+      location,
+      phone,
+      rating,
+      status,
+      email,
+      password,
+    } = req.body;
+
+    if (name !== undefined) doc.name = String(name).trim();
+    if (specialty !== undefined) doc.specialty = String(specialty).trim();
+    if (location !== undefined) doc.location = String(location || "").trim();
+    if (phone !== undefined) doc.phone = String(phone || "").trim();
+    if (rating !== undefined) doc.rating = Number(rating) || doc.rating;
+    if (status === "active" || status === "inactive") doc.status = status;
+
+    /* Legacy doctor row with no login — create User when email + password supplied */
+    if (!doc.userId && email?.trim() && password && String(password).length >= 6) {
+      const em = String(email).toLowerCase().trim();
+      if (await User.findOne({ email: em })) {
+        return res.status(400).json({ message: "Email already registered" });
+      }
+      const hashed = await bcrypt.hash(String(password), 10);
+      const user = await User.create({
+        name: doc.name,
+        email: em,
+        password: hashed,
+        role: "doctor",
+      });
+      doc.userId = user._id;
+    }
+
+    await doc.save();
+
+    if (doc.userId) {
+      const user = await User.findById(doc.userId);
+      if (user && user.role === "doctor") {
+        if (name !== undefined) user.name = doc.name;
+        if (email !== undefined && String(email).trim()) {
+          const em = String(email).toLowerCase().trim();
+          const taken = await User.findOne({
+            email: em,
+            _id: { $ne: user._id },
+          });
+          if (taken) {
+            return res.status(400).json({ message: "Email already in use" });
+          }
+          user.email = em;
+        }
+        if (password && String(password).length >= 6) {
+          user.password = await bcrypt.hash(String(password), 10);
+        }
+        await user.save();
+      }
+    }
+
+    const populated = await Doctor.findById(doc._id).populate(
+      "userId",
+      "email name role"
+    );
+    res.json(doctorToJSON(populated));
   } catch (e) {
     res.status(500).json({ message: e.message });
   }
 });
 
-router.patch("/doctors/:id/status", auth, adminOnly, async (req, res) => {
+router.patch("/doctors/:id/status", async (req, res) => {
   try {
     const { status } = req.body;
-    if (!["active", "inactive"].includes(status))
+    if (!["active", "inactive"].includes(status)) {
       return res.status(400).json({ message: "Invalid status" });
+    }
     const doc = await Doctor.findByIdAndUpdate(
       req.params.id,
       { status },
       { new: true }
-    );
+    ).populate("userId", "email name role");
     if (!doc) return res.status(404).json({ message: "Doctor not found" });
-    res.json(doc);
+    res.json(doctorToJSON(doc));
   } catch (e) {
     res.status(500).json({ message: e.message });
   }
 });
 
-router.delete("/doctors/:id", auth, adminOnly, async (req, res) => {
+router.delete("/doctors/:id", async (req, res) => {
   try {
-    const r = await Doctor.findByIdAndDelete(req.params.id);
-    if (!r) return res.status(404).json({ message: "Doctor not found" });
-    res.json({ message: "Deleted" });
-  } catch (e) {
-    res.status(500).json({ message: e.message });
-  }
-});
+    const doc = await Doctor.findById(req.params.id);
+    if (!doc) return res.status(404).json({ message: "Doctor not found" });
 
-/* ═══ Medicines ═════════════════════════════════════════════════ */
+    await Prescription.deleteMany({ doctorId: doc._id });
+    await Appointment.deleteMany({ doctorId: doc._id });
 
-router.get("/medicines", auth, adminOnly, async (req, res) => {
-  try {
-    const medicines = await Medicine.find().sort({ name: 1 });
-    res.json(medicines);
-  } catch (e) {
-    res.status(500).json({ message: e.message });
-  }
-});
+    const uid = doc.userId;
+    await Doctor.deleteOne({ _id: doc._id });
 
-router.post("/medicines", auth, adminOnly, async (req, res) => {
-  try {
-    const { name, category, price, stock, status, isPrescribed } = req.body;
-    if (!name?.trim()) return res.status(400).json({ message: "Medicine name is required" });
-    const stockNum = parseInt(stock, 10);
-    const stockSafe = Number.isFinite(stockNum) ? stockNum : 0;
-    let st = status;
-    if (!["available", "low_stock", "out_of_stock"].includes(st)) {
-      if (stockSafe <= 0) st = "out_of_stock";
-      else if (stockSafe < 10) st = "low_stock";
-      else st = "available";
+    if (uid) {
+      const u = await User.findById(uid);
+      if (u && u.role === "doctor") await User.deleteOne({ _id: uid });
     }
+
+    res.json({ message: "Doctor removed" });
+  } catch (e) {
+    res.status(500).json({ message: e.message });
+  }
+});
+
+/* ══════════════════════════════════════════════════════════════════
+   MEDICINES
+══════════════════════════════════════════════════════════════════ */
+
+router.get("/medicines", async (req, res) => {
+  try {
+    const list = await Medicine.find().sort({ name: 1 });
+    res.json(list);
+  } catch (e) {
+    res.status(500).json({ message: e.message });
+  }
+});
+
+router.post("/medicines", async (req, res) => {
+  try {
+    const { name, category, price, stock, status, isPrescribed, color, shape } =
+      req.body;
+    if (!name?.trim()) return res.status(400).json({ message: "Name required" });
+
     const m = await Medicine.create({
       name: name.trim(),
-      category: category?.trim() || "General",
-      price: parseFloat(price) || 0,
-      stock: stockSafe,
-      status: st,
+      category: category || "General",
+      price: Number(price) || 0,
+      stock: parseInt(stock, 10) || 0,
+      status: ["available", "low_stock", "out_of_stock"].includes(status)
+        ? status
+        : "available",
       isPrescribed: Boolean(isPrescribed),
+      color: color?.trim() || "#6366F1",
+      shape: ["tablet", "capsule", "softgel"].includes(shape) ? shape : "tablet",
     });
     res.status(201).json(m);
   } catch (e) {
@@ -128,65 +251,38 @@ router.post("/medicines", auth, adminOnly, async (req, res) => {
   }
 });
 
-router.put("/medicines/:id", auth, adminOnly, async (req, res) => {
+router.put("/medicines/:id", async (req, res) => {
   try {
-    if (!mongoose.Types.ObjectId.isValid(req.params.id))
-      return res.status(400).json({ message: "Invalid id" });
-    const { name, category, price, stock, status, isPrescribed } = req.body;
-    const updates = {};
-    if (name != null) updates.name = String(name).trim();
-    if (category != null) updates.category = String(category).trim();
-    if (price != null) updates.price = parseFloat(price) || 0;
-    if (stock != null) {
-      const sn = parseInt(stock, 10);
-      updates.stock = Number.isFinite(sn) ? sn : 0;
-    }
-    if (status != null && ["available", "low_stock", "out_of_stock"].includes(status))
-      updates.status = status;
-    if (isPrescribed != null) updates.isPrescribed = Boolean(isPrescribed);
-
-    const m = await Medicine.findByIdAndUpdate(req.params.id, updates, {
-      new: true,
-      runValidators: true,
-    });
+    const m = await Medicine.findById(req.params.id);
     if (!m) return res.status(404).json({ message: "Medicine not found" });
+
+    const { name, category, price, stock, status, isPrescribed, color, shape } =
+      req.body;
+
+    if (name !== undefined) m.name = String(name).trim();
+    if (category !== undefined) m.category = String(category || "General");
+    if (price !== undefined) m.price = Number(price) || 0;
+    if (stock !== undefined) m.stock = parseInt(stock, 10) || 0;
+    if (["available", "low_stock", "out_of_stock"].includes(status)) {
+      m.status = status;
+    }
+    if (isPrescribed !== undefined) m.isPrescribed = Boolean(isPrescribed);
+    if (color !== undefined) m.color = String(color).trim() || m.color;
+    if (shape !== undefined && ["tablet", "capsule", "softgel"].includes(shape)) {
+      m.shape = shape;
+    }
+    await m.save();
     res.json(m);
   } catch (e) {
     res.status(500).json({ message: e.message });
   }
 });
 
-router.delete("/medicines/:id", auth, adminOnly, async (req, res) => {
+router.delete("/medicines/:id", async (req, res) => {
   try {
-    const r = await Medicine.findByIdAndDelete(req.params.id);
-    if (!r) return res.status(404).json({ message: "Medicine not found" });
-    res.json({ message: "Deleted" });
-  } catch (e) {
-    res.status(500).json({ message: e.message });
-  }
-});
-
-/* ═══ Users ═════════════════════════════════════════════════════ */
-
-router.get("/users", auth, adminOnly, async (req, res) => {
-  try {
-    const users = await User.find().select("-password").sort({ createdAt: -1 });
-    res.json(users);
-  } catch (e) {
-    res.status(500).json({ message: e.message });
-  }
-});
-
-router.patch("/users/:id/role", auth, adminOnly, async (req, res) => {
-  try {
-    const { role } = req.body;
-    if (!["user", "doctor", "admin"].includes(role))
-      return res.status(400).json({ message: "Invalid role" });
-    const u = await User.findByIdAndUpdate(req.params.id, { role }, { new: true }).select(
-      "-password"
-    );
-    if (!u) return res.status(404).json({ message: "User not found" });
-    res.json(u);
+    const r = await Medicine.deleteOne({ _id: req.params.id });
+    if (r.deletedCount === 0) return res.status(404).json({ message: "Not found" });
+    res.json({ message: "Medicine removed" });
   } catch (e) {
     res.status(500).json({ message: e.message });
   }

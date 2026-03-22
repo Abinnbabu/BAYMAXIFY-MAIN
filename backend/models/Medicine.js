@@ -7,6 +7,8 @@ const medicineSchema = new mongoose.Schema({
   stock:        { type: Number, default: 0 },
   status:       { type: String, enum: ["available", "low_stock", "out_of_stock"], default: "available" },
   isPrescribed: { type: Boolean, default: false },
+  color:        { type: String, default: "#6366F1" },
+  shape:        { type: String, enum: ["tablet", "capsule", "softgel"], default: "tablet" },
   createdAt:    { type: Date, default: Date.now },
 });
 

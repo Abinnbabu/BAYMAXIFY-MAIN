@@ -452,7 +452,16 @@ function ManageDoctors({ T }) {
   const [confirmDel, setConfirmDel] = useState(null);
   const [toast,      setToast]      = useState(null);
 
-  const emptyForm = { name:"",specialty:SPECIALTIES[0],status:"active",location:"",rating:"",phone:"" };
+  const emptyForm = {
+    name: "",
+    specialty: SPECIALTIES[0],
+    status: "active",
+    location: "",
+    rating: "",
+    phone: "",
+    email: "",
+    password: "",
+  };
   const [form, setForm] = useState(emptyForm);
 
   /* Load doctors from backend */
@@ -469,21 +478,60 @@ function ManageDoctors({ T }) {
 
   const openAdd  = () => { setForm(emptyForm); setModal("add"); };
   const openEdit = (doc) => {
-    setForm({ name:doc.name, specialty:doc.specialty, status:doc.status, location:doc.location, rating:String(doc.rating), phone:doc.phone });
+    const login =
+      doc.loginEmail ||
+      (doc.userId && typeof doc.userId === "object" ? doc.userId.email : "") ||
+      "";
+    setForm({
+      name: doc.name,
+      specialty: doc.specialty,
+      status: doc.status,
+      location: doc.location || "",
+      rating: String(doc.rating ?? ""),
+      phone: doc.phone || "",
+      email: login,
+      password: "",
+    });
     setEditDoc(doc);
     setModal("edit");
   };
 
   const handleSave = async () => {
     if (!form.name.trim() || !form.location.trim()) { showToast("Name and location are required","error"); return; }
+    if (modal === "add") {
+      if (!form.email.trim()) { showToast("Login email is required for the doctor portal","error"); return; }
+      if (!form.password || form.password.length < 6) {
+        showToast("Password must be at least 6 characters","error");
+        return;
+      }
+    }
     try {
       if (modal === "add") {
-        const newDoc = await adminAddDoctor({ ...form, rating: parseFloat(form.rating)||4.5 });
+        const newDoc = await adminAddDoctor({
+          name: form.name.trim(),
+          specialty: form.specialty,
+          status: form.status,
+          location: form.location.trim(),
+          phone: form.phone.trim(),
+          rating: parseFloat(form.rating) || 4.5,
+          email: form.email.trim(),
+          password: form.password,
+        });
         setDoctors(p => [...p, newDoc]);
-        showToast(`Dr. ${form.name} added successfully`);
+        showToast(`Dr. ${form.name} added — they can sign in with that email.`);
       } else {
-        const updated = await adminUpdateDoctor(editDoc._id, { ...form, rating: parseFloat(form.rating)||editDoc.rating });
-        setDoctors(p => p.map(d => d._id===editDoc._id ? updated : d));
+        const payload = {
+          name: form.name.trim(),
+          specialty: form.specialty,
+          status: form.status,
+          location: form.location.trim(),
+          phone: form.phone.trim(),
+          rating: parseFloat(form.rating) || editDoc.rating,
+          email: form.email.trim(),
+        };
+        if (form.password.trim().length >= 6) payload.password = form.password.trim();
+        const updated = await adminUpdateDoctor(editDoc._id, payload);
+        setDoctors(p => p.map(d => d._id === editDoc._id ? updated : d));
         showToast(`${form.name} updated`);
       }
       setModal(null);
@@ -566,7 +614,7 @@ function ManageDoctors({ T }) {
             No doctors match your search
           </div>
         ) : filtered.map((doc, i) => (
-          <div key={doc._id} className="row-item"
+          <div key={doc._id || doc.id} className="row-item"
             style={{
               display:"grid",gridTemplateColumns:"2fr 2fr 1.2fr 1fr 1.2fr 120px",
               padding:"14px 20px",alignItems:"center",
@@ -581,11 +629,16 @@ function ManageDoctors({ T }) {
                 display:"flex",alignItems:"center",justifyContent:"center",
                 fontFamily:"'DM Sans',sans-serif",fontWeight:700,fontSize:"0.76rem",flexShrink:0,
               }}>
-                {doc.name.split(" ").slice(1,3).map(n=>n[0]).join("")}
+                {(doc.name || "?").replace(/^Dr\.?\s*/i,"").split(/\s+/).filter(Boolean).slice(0,2).map(n=>n[0]).join("") || "?"}
               </div>
               <div>
                 <p style={{ fontWeight:600,fontSize:"0.86rem",color:T.text }}>{doc.name}</p>
-                <p style={{ fontSize:"0.73rem",color:T.muted,marginTop:1 }}>{doc.phone}</p>
+                <p style={{ fontSize:"0.73rem",color:T.muted,marginTop:1 }}>{doc.phone || "—"}</p>
+                {(doc.loginEmail || (doc.userId && doc.userId.email)) && (
+                  <p style={{ fontSize:"0.7rem",color:T.primary,marginTop:2,opacity:.9 }}>
+                    {doc.loginEmail || doc.userId.email}
+                  </p>
+                )}
               </div>
             </div>
             {/* Specialty */}
@@ -684,6 +737,18 @@ function ManageDoctors({ T }) {
                 placeholder="+91 XXXXX XXXXX" style={inputSty}/>
             </Field>
             <div style={{ gridColumn:"1/-1" }}>
+              <Field label="Login email (doctor portal)" required={modal==="add"}>
+                <input type="email" value={form.email} onChange={e=>setForm(p=>({...p,email:e.target.value}))}
+                  placeholder="doctor@clinic.com" style={inputSty} autoComplete="off"/>
+              </Field>
+            </div>
+            <div style={{ gridColumn:"1/-1" }}>
+              <Field label={modal==="add" ? "Password (min 6 characters)" : "New password (leave blank to keep)"} required={modal==="add"}>
+                <input type="password" value={form.password} onChange={e=>setForm(p=>({...p,password:e.target.value}))}
+                  placeholder={modal==="add" ? "••••••••" : "Only if changing password"} style={inputSty} autoComplete="new-password"/>
+              </Field>
+            </div>
+            <div style={{ gridColumn:"1/-1" }}>
               <Field label="Initial Rating">
                 <input type="number" min="1" max="5" step="0.1" value={form.rating}
                   onChange={e=>setForm(p=>({...p,rating:e.target.value}))}
@@ -696,7 +761,7 @@ function ManageDoctors({ T }) {
 
       {confirmDel && (
         <ConfirmDialog T={T}
-          msg={`Are you sure you want to remove ${confirmDel.name}? This action cannot be undone.`}
+          msg={`Are you sure you want to remove ${confirmDel.name}? Their login account will be removed too.`}
           onConfirm={handleDelete}
           onCancel={()=>setConfirmDel(null)}/>
       )}
@@ -718,7 +783,16 @@ function ManageMedicines({ T }) {
   const [confirmDel, setConfirmDel] = useState(null);
   const [toast,      setToast]      = useState(null);
 
-  const emptyForm = { name:"",category:MED_CATS[0],price:"",stock:"",status:"available",isPrescribed:false };
+  const emptyForm = {
+    name: "",
+    category: MED_CATS[0],
+    price: "",
+    stock: "",
+    status: "available",
+    isPrescribed: false,
+    color: "#6366F1",
+    shape: "tablet",
+  };
   const [form, setForm] = useState(emptyForm);
 
   /* Load medicines from backend */
@@ -732,7 +806,16 @@ function ManageMedicines({ T }) {
 
   const openAdd  = () => { setForm(emptyForm); setModal("add"); };
   const openEdit = (m) => {
-    setForm({ name:m.name, category:m.category, price:String(m.price), stock:String(m.stock), status:m.status, isPrescribed:m.isPrescribed });
+    setForm({
+      name: m.name,
+      category: m.category,
+      price: String(m.price),
+      stock: String(m.stock),
+      status: m.status,
+      isPrescribed: m.isPrescribed,
+      color: m.color || "#6366F1",
+      shape: m.shape || "tablet",
+    });
     setEditMed(m);
     setModal("edit");
   };
@@ -741,11 +824,23 @@ function ManageMedicines({ T }) {
     if (!form.name.trim()) { showToast("Medicine name is required","error"); return; }
     try {
       if (modal==="add") {
-        const nm = await adminAddMedicine({ ...form, price:parseFloat(form.price)||0, stock:parseInt(form.stock)||0 });
+        const nm = await adminAddMedicine({
+          ...form,
+          price: parseFloat(form.price) || 0,
+          stock: parseInt(form.stock, 10) || 0,
+          color: form.color || "#6366F1",
+          shape: form.shape || "tablet",
+        });
         setMedicines(p => [...p, nm]);
         showToast(`${form.name} added`);
       } else {
-        const updated = await adminUpdateMedicine(editMed._id, { ...form, price:parseFloat(form.price)||editMed.price, stock:parseInt(form.stock)||editMed.stock });
+        const updated = await adminUpdateMedicine(editMed._id, {
+          ...form,
+          price: parseFloat(form.price) || editMed.price,
+          stock: parseInt(form.stock, 10) || editMed.stock,
+          color: form.color || "#6366F1",
+          shape: form.shape || "tablet",
+        });
         setMedicines(p => p.map(m => m._id===editMed._id ? updated : m));
         showToast(`${form.name} updated`);
       }
@@ -844,7 +939,7 @@ function ManageMedicines({ T }) {
             No medicines match your search
           </div>
         ) : filtered.map((med, i) => (
-          <div key={med._id} className="row-item"
+          <div key={med.id} className="row-item"
             style={{
               display:"grid",gridTemplateColumns:"2.2fr 1.4fr 0.8fr 0.8fr 1.2fr 0.9fr 110px",
               padding:"13px 20px",alignItems:"center",
@@ -945,6 +1040,17 @@ function ManageMedicines({ T }) {
               <input type="number" min="0" value={form.stock}
                 onChange={e=>setForm(p=>({...p,stock:e.target.value}))}
                 placeholder="0" style={inputSty}/>
+            </Field>
+            <Field label="Card color (hex)">
+              <input value={form.color} onChange={e=>setForm(p=>({...p,color:e.target.value}))}
+                placeholder="#6366F1" style={inputSty}/>
+            </Field>
+            <Field label="Illustration shape">
+              <select value={form.shape} onChange={e=>setForm(p=>({...p,shape:e.target.value}))} style={{ ...inputSty,cursor:"pointer" }}>
+                <option value="tablet">Tablet</option>
+                <option value="capsule">Capsule</option>
+                <option value="softgel">Softgel</option>
+              </select>
             </Field>
             <div style={{ gridColumn:"1/-1" }}>
               <label style={{
