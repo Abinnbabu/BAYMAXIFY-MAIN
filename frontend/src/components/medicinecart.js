@@ -1,7 +1,36 @@
 import { useState, useRef, useEffect, useContext } from "react";
 import { useNavigate } from "react-router-dom";
 import { ThemeContext } from "../App";
-import { getMedicines, addToCart, getMyPrescriptions } from "../api";
+import { getMedicines, addToCart, getMyPrescriptions, getUser } from "../api";
+
+function formatDoctorDisplayName(name) {
+  if (!name || !String(name).trim()) return "";
+  const t = String(name).trim();
+  return /^dr\.?\s/i.test(t) ? t : `Dr. ${t}`;
+}
+
+/** Latest prescription → banner label (doctor + date) */
+function prescriptionBannerFromList(prescriptions) {
+  const list = Array.isArray(prescriptions) ? prescriptions : [];
+  if (!list.length) return { doctor: "", date: "" };
+  const sorted = [...list].sort(
+    (a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0)
+  );
+  const latest = sorted[0];
+  const d = latest?.doctorId;
+  const rawName =
+    d && typeof d === "object" && d.name ? d.name : "";
+  return {
+    doctor: formatDoctorDisplayName(rawName),
+    date: latest?.createdAt
+      ? new Date(latest.createdAt).toLocaleDateString(undefined, {
+          month: "short",
+          day: "numeric",
+          year: "numeric",
+        })
+      : "",
+  };
+}
 
 /* ─── Theme Palettes ─────────────────────────────────────────────────────────── */
 const THEMES = {
@@ -98,6 +127,11 @@ function Navbar({ T, themeKey, setThemeKey, cartCount }) {
   const [open, setOpen] = useState(false);
   const dropRef = useRef(null);
   const navigate = useNavigate();
+  const user = getUser();
+  const profileLabel =
+    user?.name?.trim() ||
+    (user?.email ? user.email.split("@")[0] : "") ||
+    "Profile";
 
   useEffect(() => {
     const close = (e) => { if (dropRef.current && !dropRef.current.contains(e.target)) setOpen(false); };
@@ -151,7 +185,7 @@ function Navbar({ T, themeKey, setThemeKey, cartCount }) {
           <svg width="14" height="14" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
             <circle cx="10" cy="7" r="3.5"/><path d="M3 17c0-3.3 3.1-6 7-6s7 2.7 7 6"/>
           </svg>
-          Amar
+          {profileLabel}
         </button>
 
         <div ref={dropRef} style={{ position:"relative" }}>
@@ -351,6 +385,7 @@ export default function MedicineCartPage() {
 
   const [medicines,      setMedicines]      = useState([]);
   const [prescribedMeds, setPrescribedMeds] = useState([]); // names from user's prescriptions
+  const [rxBanner, setRxBanner] = useState({ doctor: "", date: "" });
   const [quantities,     setQuantities]     = useState({});
   const [showRxOnly,     setShowRxOnly]     = useState(false);
   const [activeCategory, setActiveCategory] = useState("All");
@@ -366,9 +401,10 @@ export default function MedicineCartPage() {
       getMyPrescriptions().catch(() => []),
     ]).then(([meds, prescriptions]) => {
       setMedicines(Array.isArray(meds) ? meds : []);
-      // Extract all prescribed medicine names from all prescriptions
-      const names = prescriptions.flatMap(p =>
-        (p.medicines || []).map(m => m.name?.toLowerCase())
+      const rxList = Array.isArray(prescriptions) ? prescriptions : [];
+      setRxBanner(prescriptionBannerFromList(rxList));
+      const names = rxList.flatMap((p) =>
+        (p.medicines || []).map((m) => (m.name || "").toLowerCase()).filter(Boolean)
       );
       setPrescribedMeds([...new Set(names)]);
     }).finally(() => setLoading(false));
@@ -547,7 +583,17 @@ export default function MedicineCartPage() {
                   <circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/>
                 </svg>
                 <p style={{ fontSize:"0.82rem",color:"#B45309",fontWeight:500 }}>
-                  Showing <strong>{filtered.length}</strong> medicines matching your prescription from Dr. Priya Menon · Jan 12, 2025
+                  Showing <strong>{filtered.length}</strong> medicines matching your prescription
+                  {rxBanner.doctor || rxBanner.date ? (
+                    <>
+                      {" "}from <strong>{rxBanner.doctor || "your doctor"}</strong>
+                      {rxBanner.date ? <> · {rxBanner.date}</> : null}
+                    </>
+                  ) : prescribedMeds.length ? (
+                    <> (from your prescriptions)</>
+                  ) : (
+                    <> — add prescriptions from your doctor to see matches</>
+                  )}
                 </p>
               </div>
             )}
@@ -571,7 +617,7 @@ export default function MedicineCartPage() {
                 {filtered.map((med, idx) => {
                   const qty = quantities[med._id] || 0;
                   const inCart = qty > 0;
-                  const isPrescribed = med.isPrescribed;
+                  const isPrescribed = isUserPrescribed(med);
 
                   return (
                     <div
