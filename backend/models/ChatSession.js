@@ -7,7 +7,8 @@ const messageSchema = new mongoose.Schema({
 });
 
 const chatSessionSchema = new mongoose.Schema({
-  userId:     { type: mongoose.Schema.Types.ObjectId, ref: "User", required: true },
+  /* String so JWT subjects work (Mongo ObjectId strings + admin id "admin") */
+  userId:     { type: String, required: true, index: true },
   messages:   [messageSchema],
   startedAt:  { type: Date, default: Date.now },
   lastActive: { type: Date, default: Date.now },

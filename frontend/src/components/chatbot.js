@@ -157,14 +157,14 @@ function Navbar({ T, themeKey, setThemeKey }) {
       {/* Right side */}
       <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
 
-        {/* Username pill */}
+        {/* Home — Baymaxify landing (home.js) */}
         <button
           style={{
             ...navBtn,
             opacity: .85,
             pointerEvents: "auto",
           }}
-          onClick={() => navigate("/profile")}
+          onClick={() => navigate("/home")}
         >
           <svg width="14" height="14" viewBox="0 0 20 20" fill="none"
             stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
@@ -272,10 +272,19 @@ export default function BaymaxifyChat() {
 
       setMessages((prev) => [...prev, { sender: "bot", text: data.reply }]);
     } catch (err) {
-      setError("Connection issue. Please try again.");
+      const detail =
+        err?.message ||
+        (typeof err === "string" ? err : "Connection issue. Please try again.");
+      setError(detail);
       setMessages((prev) => [
         ...prev,
-        { sender: "bot", text: "I'm having a little trouble connecting right now. Please try again in a moment 💙" },
+        {
+          sender: "bot",
+          text:
+            detail.includes("token") || detail.includes("log")
+              ? "Please sign in again to use the chat, then retry 💙"
+              : "I'm having a little trouble connecting right now. Please try again in a moment 💙",
+        },
       ]);
     } finally {
       setTyping(false);
@@ -425,6 +434,21 @@ export default function BaymaxifyChat() {
                 </div>
               )}
             </div>
+
+            {error ? (
+              <div
+                role="alert"
+                style={{
+                  padding: "10px 20px",
+                  fontSize: 13,
+                  color: "#B91C1C",
+                  background: "rgba(185, 28, 28, 0.08)",
+                  borderTop: `1px solid ${T.subtle}`,
+                }}
+              >
+                {error}
+              </div>
+            ) : null}
 
             {/* INPUT */}
             <div

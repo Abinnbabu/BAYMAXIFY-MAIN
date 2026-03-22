@@ -30,7 +30,14 @@ async function request(path, options = {}) {
     ...options.headers,
   };
 
-  const res = await fetch(`${BASE}${path}`, { ...options, headers });
+  let res;
+  try {
+    res = await fetch(`${BASE}${path}`, { ...options, headers });
+  } catch (e) {
+    throw new Error(
+      "Cannot reach the server. Is the backend running on port 5000?"
+    );
+  }
   const data = await res.json().catch(() => ({}));
 
   if (!res.ok) throw new Error(data.message || "Request failed");

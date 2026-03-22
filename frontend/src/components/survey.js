@@ -67,50 +67,6 @@ const SEVERITY_CFG = {
   },
 };
 
-/* ─── Doctor recommendations ─────────────────────────────────────────────────── */
-const DOCTOR_RECS = {
-  critical:[
-    {name:"Dr. Priya Menon",   specialty:"Psychiatrist",              rating:4.7,mode:"Offline",avail:"Today 4:30 PM"},
-    {name:"Dr. Rahul Sharma",  specialty:"Sleep & Cognitive Therapy", rating:4.8,mode:"Offline",avail:"Today 2:00 PM"},
-  ],
-  moderate:[
-    {name:"Dr. Kavya Iyer",    specialty:"Anxiety Specialist",        rating:4.6,mode:"Online", avail:"Tomorrow 10:00 AM"},
-    {name:"Dr. Arjun Nair",    specialty:"Behavioral Therapy",        rating:4.9,mode:"Both",   avail:"Thu 9:00 AM"},
-  ],
-  mild:[
-    {name:"Dr. Kavya Iyer",    specialty:"Anxiety Specialist",        rating:4.6,mode:"Online", avail:"Anytime this week"},
-    {name:"Dr. Lekha Krishnan",specialty:"Stress Management",         rating:4.5,mode:"Online", avail:"Fri 3:00 PM"},
-  ],
-  stable:[
-    {name:"Dr. Arjun Nair",    specialty:"Behavioral Therapy",        rating:4.9,mode:"Online", avail:"Whenever you need"},
-  ],
-};
-
-/* ─── Scoring helpers ────────────────────────────────────────────────────────── */
-const NEGATIVE_EMOTIONS = ["Overwhelmed","Anxious","Sad","Irritated"];
-
-function computeSeverity({ emotions, intensity, trigger, impact }) {
-  let score = 0;
-  // Emotion score: negative emotions weighted
-  const negCount = emotions.filter(e => NEGATIVE_EMOTIONS.includes(e)).length;
-  score += negCount * 2;
-  // Intensity score
-  if (intensity >= 8) score += 4;
-  else if (intensity >= 6) score += 2;
-  else if (intensity >= 4) score += 1;
-  // Trigger penalty
-  if (trigger === "Health concerns") score += 2;
-  if (trigger === "Relationships") score += 1;
-  // Impact penalty
-  if (impact === "Racing thoughts" || impact === "Emotional withdrawal") score += 2;
-  if (impact === "Physical tension") score += 1;
-
-  if (score >= 10) return "critical";
-  if (score >= 6)  return "moderate";
-  if (score >= 2)  return "mild";
-  return "stable";
-}
-
 /* ─── Global CSS ─────────────────────────────────────────────────────────────── */
 const GLOBAL_CSS = `
   @import url('https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&family=DM+Sans:opsz,wght@9..40,300;9..40,400;9..40,500;9..40,600&display=swap');
@@ -272,20 +228,39 @@ function AnalysisOverlay({T,progress}) {
 }
 
 /* ─── Severity Result Modal ───────────────────────────────────────────────────── */
-function SeverityModal({T,result,onClose}) {
-  const {severity,summary,emotions,intensity,trigger,impact,notes} = result;
-  const cfg = SEVERITY_CFG[severity];
-  const docs = DOCTOR_RECS[severity] || [];
-  const maxScore = 12;
-  const scoreMap = {critical:10,moderate:7,mild:3,stable:0};
-  const score = scoreMap[severity] + Math.floor(Math.random()*2);
-  const pct = Math.min(Math.round((score/maxScore)*100),100);
+function doctorInitials(name) {
+  const words = String(name || "").replace(/^Dr\.?\s*/i, "").trim().split(/\s+/).filter(Boolean);
+  if (!words.length) return "?";
+  if (words.length === 1) return words[0].slice(0, 2).toUpperCase();
+  return (words[0][0] + words[words.length - 1][0]).toUpperCase();
+}
 
-  const modeColor = (mode) => {
-    if(mode==="Online") return{bg:"rgba(16,185,129,.12)",color:"#059669"};
-    if(mode==="Offline") return{bg:"rgba(239,68,68,.1)",color:"#DC2626"};
-    return{bg:"rgba(34,85,164,.1)",color:"#2255A4"};
-  };
+function consultTypeLabel(ct) {
+  const c = String(ct || "").toLowerCase();
+  if (c === "immediate") return "Urgent / immediate";
+  if (c === "offline") return "In-clinic";
+  if (c === "online") return "Online";
+  return ct || "";
+}
+
+function modeColorFromConsult(ct) {
+  const c = String(ct || "").toLowerCase();
+  if (c === "online") return { background: "rgba(16,185,129,.12)", color: "#059669" };
+  if (c === "offline") return { background: "rgba(239,68,68,.1)", color: "#DC2626" };
+  if (c === "immediate") return { background: "rgba(220,38,38,.12)", color: "#DC2626" };
+  return { background: "rgba(34,85,164,.1)", color: "#2255A4" };
+}
+
+function SeverityModal({T,result,onClose}) {
+  const { severity, summary, emotions, intensity, trigger, impact, notes, doctors = [], consultType, urgency } = result;
+  const cfg = SEVERITY_CFG[severity];
+  const docs = doctors;
+  const maxScore = 12;
+  const scoreMap = { critical: 10, moderate: 7, mild: 3, stable: 0 };
+  const score = scoreMap[severity] + Math.floor(Math.random() * 2);
+  const pct = Math.min(Math.round((score / maxScore) * 100), 100);
+
+  const consultBadge = modeColorFromConsult(consultType);
 
   return (
     <div onClick={onClose} style={{position:"fixed",inset:0,zIndex:500,background:"rgba(0,0,0,.62)",backdropFilter:"blur(7px)",display:"flex",alignItems:"center",justifyContent:"center",padding:16,animation:"overlayIn .22s ease both",overflowY:"auto"}}>
@@ -330,7 +305,7 @@ function SeverityModal({T,result,onClose}) {
           {/* Description */}
           <div style={{background:T.card,border:`1px solid ${T.subtle}`,borderRadius:16,padding:"15px 18px"}}>
             <p style={{fontSize:"0.68rem",fontWeight:700,letterSpacing:".12em",textTransform:"uppercase",color:T.muted,marginBottom:8}}>Assessment Summary</p>
-            <p style={{fontSize:"0.9rem",color:T.text,lineHeight:1.75}}>{cfg.desc}</p>
+            <p style={{fontSize:"0.9rem",color:T.text,lineHeight:1.75}}>{summary || cfg.desc}</p>
           </div>
 
           {/* Survey summary recap */}
@@ -365,39 +340,44 @@ function SeverityModal({T,result,onClose}) {
             <div>
               <p style={{fontSize:"0.68rem",fontWeight:700,letterSpacing:".1em",textTransform:"uppercase",color:cfg.color,marginBottom:3}}>Recommended Consultation</p>
               <p style={{fontSize:"0.88rem",color:cfg.color,fontWeight:600}}>
-                {cfg.consultType}
-                <span style={{marginLeft:10,fontWeight:400,opacity:.75,fontSize:"0.82rem"}}>· {cfg.urgency}</span>
+                {consultTypeLabel(consultType) || cfg.consultType}
+                <span style={{marginLeft:10,fontWeight:400,opacity:.75,fontSize:"0.82rem"}}>· {urgency || cfg.urgency}</span>
               </p>
             </div>
           </div>
 
-          {/* Doctor recommendations */}
+          {/* Doctor recommendations — only doctors from the database who match recommended specialties */}
           <div>
-            <p style={{fontSize:"0.68rem",fontWeight:700,letterSpacing:".12em",textTransform:"uppercase",color:T.muted,marginBottom:12}}>Recommended Doctors</p>
+            <p style={{fontSize:"0.68rem",fontWeight:700,letterSpacing:".12em",textTransform:"uppercase",color:T.muted,marginBottom:12}}>Matching doctors in our network</p>
+            {docs.length === 0 ? (
+              <p style={{fontSize:"0.86rem",color:T.muted,lineHeight:1.65,margin:0}}>
+                No active doctors in the database match these specialty recommendations yet. You can still book from the Medical page or add doctors in the admin panel.
+              </p>
+            ) : (
             <div style={{display:"flex",flexDirection:"column",gap:10}}>
               {docs.map((doc,i)=>{
-                const mc=modeColor(doc.mode);
+                const rating = typeof doc.rating === "number" ? doc.rating.toFixed(1) : "—";
+                const extra = [doc.location, doc.phone].filter(Boolean).join(" · ");
+                const key = doc._id || doc.id || i;
                 return (
-                  <div key={i} className="rec-card" style={{background:T.card,border:`1.5px solid ${T.subtle}`,borderRadius:16,padding:"14px 16px",display:"flex",alignItems:"center",gap:14,boxShadow:"0 3px 12px rgba(0,0,0,.04)",animation:`slideRowIn .3s ease ${i*0.09+0.1}s both`}}>
-                    {/* Avatar */}
+                  <div key={key} className="rec-card" style={{background:T.card,border:`1.5px solid ${T.subtle}`,borderRadius:16,padding:"14px 16px",display:"flex",alignItems:"center",gap:14,boxShadow:"0 3px 12px rgba(0,0,0,.04)",animation:`slideRowIn .3s ease ${i*0.09+0.1}s both`}}>
                     <div style={{width:44,height:44,borderRadius:13,background:T.primary,color:"#fff",display:"flex",alignItems:"center",justifyContent:"center",fontFamily:"'DM Sans',sans-serif",fontWeight:700,fontSize:"0.82rem",flexShrink:0,letterSpacing:".04em"}}>
-                      {doc.name.split(" ").slice(1,3).map(n=>n[0]).join("")}
+                      {doctorInitials(doc.name)}
                     </div>
                     <div style={{flex:1,minWidth:0}}>
                       <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap",marginBottom:3}}>
                         <p style={{fontWeight:600,fontSize:"0.88rem",color:T.text}}>{doc.name}</p>
-                        <span style={{...mc,borderRadius:99,padding:"2px 9px",fontSize:"0.68rem",fontWeight:700,letterSpacing:".05em"}}>{doc.mode}</span>
+                        <span style={{...consultBadge,borderRadius:99,padding:"2px 9px",fontSize:"0.68rem",fontWeight:700,letterSpacing:".05em"}}>{consultTypeLabel(consultType) || "Consult"}</span>
                       </div>
                       <p style={{fontSize:"0.76rem",color:T.muted,marginBottom:5}}>{doc.specialty}</p>
-                      <div style={{display:"flex",alignItems:"center",gap:12}}>
+                      <div style={{display:"flex",alignItems:"center",gap:12,flexWrap:"wrap"}}>
                         <div style={{display:"flex",alignItems:"center",gap:3}}>
                           <svg width="11" height="11" viewBox="0 0 20 20" fill={T.primary} stroke={T.primary} strokeWidth="1"><path d="M10 1l2.7 5.6L19 7.6l-4.5 4.4 1.1 6.3L10 15.4l-5.6 2.9 1.1-6.3L1 7.6l6.3-.9L10 1z"/></svg>
-                          <span style={{fontSize:"0.72rem",fontWeight:600,color:T.primary}}>{doc.rating}</span>
+                          <span style={{fontSize:"0.72rem",fontWeight:600,color:T.primary}}>{rating}</span>
                         </div>
-                        <div style={{display:"flex",alignItems:"center",gap:4}}>
-                          <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke={T.muted} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
-                          <span style={{fontSize:"0.72rem",color:T.muted}}>{doc.avail}</span>
-                        </div>
+                        {extra ? (
+                          <span style={{fontSize:"0.72rem",color:T.muted}}>{extra}</span>
+                        ) : null}
                       </div>
                     </div>
                     <button
@@ -411,6 +391,7 @@ function SeverityModal({T,result,onClose}) {
                 );
               })}
             </div>
+            )}
           </div>
 
           {/* Disclaimer */}
@@ -505,7 +486,10 @@ export default function SurveyPage() {
       clearInterval(progRef.current);
       setAnalysing(false);
       setProgress(0);
-      alert("Could not complete check-in. Please try again.");
+      const msg =
+        (err && err.message) ||
+        "Could not complete check-in. Please try again.";
+      alert(msg);
     }
   };
 

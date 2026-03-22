@@ -1,6 +1,46 @@
 const { GoogleGenerativeAI } = require("@google/generative-ai");
 
-const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
+function modelCandidates() {
+  const fromEnv = process.env.GEMINI_MODEL?.trim();
+  const defaults = [
+    "gemini-2.5-flash",
+    "gemini-2.0-flash",
+    "gemini-1.5-flash",
+    "gemini-flash-latest",
+  ];
+  const list = fromEnv ? [fromEnv, ...defaults.filter((m) => m !== fromEnv)] : defaults;
+  return [...new Set(list)];
+}
+
+function getGenAI() {
+  const key = process.env.GEMINI_API_KEY;
+  if (!key || !key.trim()) {
+    throw new Error("GEMINI_API_KEY is not set in the backend environment");
+  }
+  return new GoogleGenerativeAI(key);
+}
+
+function errText(err) {
+  if (!err) return "";
+  if (typeof err === "string") return err;
+  return [err.message, err.statusText, err.status, err.code].filter(Boolean).join(" ");
+}
+
+function isAuthOrKeyError(err) {
+  const m = errText(err);
+  if (err?.status === 403 || err?.status === 401) return true;
+  return /\b403\b|\b401\b|Forbidden|PERMISSION_DENIED|leaked|invalid.*key/i.test(m);
+}
+
+function isQuotaOrRateLimitError(err) {
+  if (err?.status === 429) return true;
+  return /\b429\b|Too Many Requests|quota exceeded|exceeded your current quota/i.test(errText(err));
+}
+
+function isLikelyWrongModelError(err) {
+  const m = errText(err);
+  return /404|Requested entity was not found|No such model|is not supported for generateContent/i.test(m);
+}
 
 /**
  * Analyse a wellness survey response and return severity + recommendations.
@@ -8,16 +48,18 @@ const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
  * @returns {{ severity, summary, consultType, urgency, recommendedSpecialties }}
  */
 async function analyzeSurvey({ emotions, trigger, intensity, impact, notes }) {
-  const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+  const emotionList = Array.isArray(emotions) ? emotions : [];
+  const intensityNum = Number(intensity);
+  const safeIntensity = Number.isFinite(intensityNum) ? intensityNum : 5;
 
   const prompt = `You are a mental health triage assistant. Analyze this wellness check-in 
 and respond ONLY with a valid JSON object — no markdown, no explanation, no backticks.
 
 Survey data:
-- Emotions felt: ${emotions.join(", ") || "None selected"}
-- Primary trigger: ${trigger}
-- Intensity (1-10): ${intensity}
-- Impact on user: ${impact}
+- Emotions felt: ${emotionList.join(", ") || "None selected"}
+- Primary trigger: ${trigger ?? "Not specified"}
+- Intensity (1-10): ${safeIntensity}
+- Impact on user: ${impact ?? "Not specified"}
 - User's own note: "${notes || "None"}"
 
 Return this exact JSON structure:
@@ -36,24 +78,52 @@ Rules:
 - severity=stable otherwise
 - consultType=immediate for critical, offline for moderate, online for mild/stable`;
 
-  const result = await model.generateContent(prompt);
-  const raw    = result.response.text().trim();
+  const genAI = getGenAI();
+  const candidates = modelCandidates();
+  let lastErr;
 
-  // Strip markdown fences if model accidentally includes them
-  const cleaned = raw.replace(/^```json\s*/i, "").replace(/```\s*$/i, "").trim();
+  for (const modelName of candidates) {
+    try {
+      const model = genAI.getGenerativeModel({ model: modelName });
+      const result = await model.generateContent(prompt);
+      let raw;
+      try {
+        raw = result.response.text().trim();
+      } catch (e) {
+        const parts = result.response?.candidates?.[0]?.content?.parts;
+        raw = parts?.map((p) => p.text || "").join("").trim() || "";
+      }
+      if (!raw) {
+        throw new Error("Empty response from model");
+      }
 
-  try {
-    return JSON.parse(cleaned);
-  } catch {
-    // Fallback if JSON parse fails
-    return {
-      severity:               "mild",
-      summary:                "We noticed some emotional strain in your responses. Consider speaking with a professional.",
-      consultType:            "online",
-      urgency:                "When convenient",
-      recommendedSpecialties: ["Anxiety Specialist", "Behavioral Therapy"],
-    };
+      const cleaned = raw.replace(/^```json\s*/i, "").replace(/```\s*$/i, "").trim();
+
+      try {
+        return JSON.parse(cleaned);
+      } catch {
+        return {
+          severity:               "mild",
+          summary:                "We noticed some emotional strain in your responses. Consider speaking with a professional.",
+          consultType:            "online",
+          urgency:                "When convenient",
+          recommendedSpecialties: ["Anxiety Specialist", "Behavioral Therapy"],
+        };
+      }
+    } catch (err) {
+      lastErr = err;
+      if (isAuthOrKeyError(err)) throw err;
+      const idx = candidates.indexOf(modelName);
+      const hasNext = idx < candidates.length - 1;
+      if (hasNext && (isLikelyWrongModelError(err) || isQuotaOrRateLimitError(err))) {
+        console.warn(`[analyzeSurvey] Model "${modelName}" failed (${err?.status || "?"}), trying next…`);
+        continue;
+      }
+      throw err;
+    }
   }
+
+  throw lastErr || new Error("No Gemini model could analyze the survey");
 }
 
 module.exports = analyzeSurvey;

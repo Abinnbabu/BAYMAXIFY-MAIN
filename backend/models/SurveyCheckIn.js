@@ -1,7 +1,8 @@
 const mongoose = require("mongoose");
 
 const surveySchema = new mongoose.Schema({
-  userId:    { type: mongoose.Schema.Types.ObjectId, ref: "User", required: true },
+  /* String: supports Mongo user ids and admin JWT id "admin" */
+  userId:    { type: String, required: true, index: true },
   emotions:  [String],
   trigger:   String,
   intensity: Number,

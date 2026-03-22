@@ -1,0 +1,3 @@
+# Secrets — never commit API keys
+backend/.env
+.env
